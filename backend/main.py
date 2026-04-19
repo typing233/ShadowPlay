@@ -286,26 +286,6 @@ async def analyze_character(input_data: TextInput):
         raise HTTPException(status_code=500, detail=f"分析过程中发生错误: {str(e)}")
 
 
-@app.post("/api/dialogue", response_model=DialogueResponse)
-async def generate_dialogue(request: DialogueRequest):
-    try:
-        speaker_profile = request.character_a_profile if request.speaker == "A" else request.character_b_profile
-        listener_profile = request.character_b_profile if request.speaker == "A" else request.character_a_profile
-        
-        response = generate_response(
-            speaker_profile,
-            listener_profile,
-            request.last_message
-        )
-        
-        return DialogueResponse(
-            message=response,
-            speaker=request.speaker
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"对话生成过程中发生错误: {str(e)}")
-
-
 def generate_response(speaker_profile: CharacterProfile, listener_profile: CharacterProfile, 
                       last_message: Optional[str] = None) -> str:
     import random
