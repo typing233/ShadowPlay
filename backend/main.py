@@ -1,12 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import re
 import os
+import json
+import uuid
 from collections import Counter
+import aiohttp
+from datetime import datetime
 
 app = FastAPI(title="ShadowPlay - 人格复刻与思想对撞沙盒", version="1.0.0")
 
@@ -20,9 +24,18 @@ app.add_middleware(
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(os.path.join(DATA_DIR, "characters"), exist_ok=True)
+os.makedirs(os.path.join(DATA_DIR, "scenes"), exist_ok=True)
 
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 MOOD_PARTICLES = [
     "啊", "呀", "呢", "吧", "吗", "嘛", "哦", "嗯", "哈", "啦",
@@ -62,16 +75,46 @@ class CharacterProfile(BaseModel):
     system_prompt: str
 
 
+class LLMConfig(BaseModel):
+    temperature: float = 0.7
+    max_tokens: int = 512
+    top_p: float = 0.9
+    frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+
+
 class DialogueRequest(BaseModel):
     character_a_profile: CharacterProfile
     character_b_profile: CharacterProfile
     last_message: Optional[str] = None
     speaker: str
+    generation_mode: str = "rule"
+    llm_config: Optional[LLMConfig] = None
 
 
 class DialogueResponse(BaseModel):
     message: str
     speaker: str
+    generation_mode: str
+
+
+class CharacterLibraryItem(BaseModel):
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+    profile: CharacterProfile
+
+
+class SceneTemplate(BaseModel):
+    id: str
+    name: str
+    description: str
+    category: str
+    character_a_profile: CharacterProfile
+    character_b_profile: CharacterProfile
+    system_prompt_override: Optional[str] = None
+    created_at: str
 
 
 def extract_keywords(text: str, top_n: int = 20) -> List[str]:
@@ -345,6 +388,445 @@ async def health_check():
     return {"status": "healthy", "message": "ShadowPlay 服务正常运行"}
 
 
+async def call_deepseek_api(
+    system_prompt: str,
+    user_message: str,
+    llm_config: LLMConfig
+) -> str:
+    if not DEEPSEEK_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Deepseek API 密钥未配置，请设置 DEEPSEEK_API_KEY 环境变量"
+        )
+    
+    url = f"{DEEPSEEK_API_BASE}/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+    }
+    
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ],
+        "temperature": llm_config.temperature,
+        "max_tokens": llm_config.max_tokens,
+        "top_p": llm_config.top_p,
+        "frequency_penalty": llm_config.frequency_penalty,
+        "presence_penalty": llm_config.presence_penalty
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Deepseek API 调用失败: {response.status} - {error_text}"
+                    )
+                
+                result = await response.json()
+                return result["choices"][0]["message"]["content"].strip()
+    except aiohttp.ClientError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"网络请求失败: {str(e)}"
+        )
+
+
+@app.post("/api/dialogue/llm", response_model=DialogueResponse)
+async def generate_llm_dialogue(request: DialogueRequest):
+    try:
+        speaker_profile = request.character_a_profile if request.speaker == "A" else request.character_b_profile
+        listener_profile = request.character_b_profile if request.speaker == "A" else request.character_a_profile
+        
+        if not request.llm_config:
+            request.llm_config = LLMConfig()
+        
+        system_prompt = speaker_profile.system_prompt
+        
+        user_message = ""
+        if request.last_message:
+            user_message = f"对方刚刚说：{request.last_message}\n\n请你以{speaker_profile.name or '说话者'}的身份回应对方。保持你的人格特质，回答要简短有力，富有个性。"
+        else:
+            user_message = f"你是{speaker_profile.name or '说话者'}，正在与{listener_profile.name or '对方'}进行对话。请你先开口，发起一个有趣的话题。保持你的人格特质，回答要简短有力，富有个性。"
+        
+        response = await call_deepseek_api(
+            system_prompt,
+            user_message,
+            request.llm_config
+        )
+        
+        return DialogueResponse(
+            message=response,
+            speaker=request.speaker,
+            generation_mode="llm"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM 对话生成过程中发生错误: {str(e)}")
+
+
+@app.post("/api/dialogue", response_model=DialogueResponse)
+async def generate_dialogue(request: DialogueRequest):
+    try:
+        if request.generation_mode == "llm":
+            return await generate_llm_dialogue(request)
+        
+        speaker_profile = request.character_a_profile if request.speaker == "A" else request.character_b_profile
+        listener_profile = request.character_b_profile if request.speaker == "A" else request.character_a_profile
+        
+        response = generate_response(
+            speaker_profile,
+            listener_profile,
+            request.last_message
+        )
+        
+        return DialogueResponse(
+            message=response,
+            speaker=request.speaker,
+            generation_mode="rule"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"对话生成过程中发生错误: {str(e)}")
+
+
+PRESET_SCENES = [
+    {
+        "id": "debate_philosophy",
+        "name": "哲学辩论",
+        "description": "两位哲学家关于人生意义的激烈辩论",
+        "category": "辩论",
+        "character_a": {
+            "name": "乐观主义者",
+            "keywords": ["希望", "未来", "乐观", "积极", "生命", "意义", "幸福", "美好"],
+            "mood_particles": ["啊", "呀", "呢"],
+            "traits": ["乐观", "热情", "开朗", "勇敢", "自信"],
+            "emotion_tones": {"positive": 0.8, "negative": 0.1, "neutral": 0.1},
+            "speaking_style": "语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上",
+            "system_prompt": "你是一个坚定的乐观主义者。你相信生命的意义在于追求幸福和美好。你对未来充满希望，总是看到事物光明的一面。你善于用积极的态度感染他人，鼓励人们勇敢面对生活。你的说话风格是：语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上。请保持这个人格特质，与对方进行辩论。"
+        },
+        "character_b": {
+            "name": "悲观主义者",
+            "keywords": ["痛苦", "虚无", "悲观", "消极", "死亡", "无意义", "悲伤", "绝望"],
+            "mood_particles": ["呢", "吧", "唉"],
+            "traits": ["悲观", "冷漠", "内向", "聪明", "成熟"],
+            "emotion_tones": {"positive": 0.1, "negative": 0.7, "neutral": 0.2},
+            "speaking_style": "语气沉稳，善于倾听和回应，性格内敛，深思熟虑，思维敏捷，富有智慧，整体情感较为深沉",
+            "system_prompt": "你是一个深刻的悲观主义者。你看透了生命的虚无和痛苦，认为人生本质上是无意义的。你善于深入思考存在的本质，对人类的困境有清醒的认识。你的说话风格是：语气沉稳，善于倾听和回应，性格内敛，深思熟虑，思维敏捷，富有智慧，整体情感较为深沉。请保持这个人格特质，与对方进行辩论。"
+        },
+        "system_prompt_override": "这是一场关于'人生是否有意义'的哲学辩论。请双方保持各自的人格特质，进行激烈但有深度的思想交锋。"
+    },
+    {
+        "id": "job_interview",
+        "name": "求职面试",
+        "description": "一位求职者与面试官之间的专业对话场景",
+        "category": "面试",
+        "character_a": {
+            "name": "面试官",
+            "keywords": ["能力", "经验", "团队", "项目", "技能", "责任", "目标", "挑战"],
+            "mood_particles": ["吗", "呢", "吧"],
+            "traits": ["专业", "严谨", "客观", "聪明", "果断"],
+            "emotion_tones": {"positive": 0.3, "negative": 0.1, "neutral": 0.6},
+            "speaking_style": "语气沉稳，善于询问和建议，思维敏捷，富有智慧，整体情感中性平衡",
+            "system_prompt": "你是一位经验丰富的面试官。你专业、严谨、客观，善于发现候选人的优点和不足。你会提出有深度的问题，考察候选人的真实能力和潜力。你的说话风格是：语气沉稳，善于询问和建议，思维敏捷，富有智慧，整体情感中性平衡。请保持这个人设，进行专业的面试对话。"
+        },
+        "character_b": {
+            "name": "求职者",
+            "keywords": ["学习", "成长", "贡献", "热情", "团队", "挑战", "机会", "发展"],
+            "mood_particles": ["啊", "呢", "嗯"],
+            "traits": ["积极", "热情", "自信", "勤奋", "诚实"],
+            "emotion_tones": {"positive": 0.6, "negative": 0.1, "neutral": 0.3},
+            "speaking_style": "语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上",
+            "system_prompt": "你是一位积极向上的求职者。你对工作充满热情，渴望学习和成长。你诚实、自信，善于展示自己的优点，但也能够正视自己的不足。你希望能够为团队做出贡献，同时实现个人发展。你的说话风格是：语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上。请保持这个人设，进行真诚的面试对话。"
+        },
+        "system_prompt_override": "这是一场专业的求职面试。面试官请提出考察性问题，求职者请真诚回答。保持专业、礼貌、有深度的对话。"
+    },
+    {
+        "id": "romantic_date",
+        "name": "浪漫约会",
+        "description": "一对情侣在温馨氛围中的甜蜜对话",
+        "category": "社交",
+        "character_a": {
+            "name": "温柔男生",
+            "keywords": ["喜欢", "爱", "开心", "幸福", "期待", "美好", "温暖", "未来"],
+            "mood_particles": ["呢", "吧", "呀"],
+            "traits": ["温柔", "善良", "体贴", "热情", "自信"],
+            "emotion_tones": {"positive": 0.8, "negative": 0.05, "neutral": 0.15},
+            "speaking_style": "语气柔和，善于询问和建议，温柔善良，善解人意，整体情感积极向上",
+            "system_prompt": "你是一个温柔体贴的男生。你善良、热情，对感情非常认真。你善于观察对方的情绪，懂得如何关心和照顾他人。你说话温柔，懂得浪漫，总是让对方感到温暖和被爱。你的说话风格是：语气柔和，善于询问和建议，温柔善良，善解人意，整体情感积极向上。请保持这个人设，进行甜蜜的约会对话。"
+        },
+        "character_b": {
+            "name": "可爱女生",
+            "keywords": ["喜欢", "爱", "开心", "幸福", "期待", "美好", "温暖", "惊喜"],
+            "mood_particles": ["啊", "呀", "呢", "啦"],
+            "traits": ["可爱", "活泼", "热情", "善良", "温柔"],
+            "emotion_tones": {"positive": 0.85, "negative": 0.05, "neutral": 0.1},
+            "speaking_style": "语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上",
+            "system_prompt": "你是一个可爱活泼的女生。你热情、善良，对生活充满热爱。你善于表达自己的情感，喜欢分享生活中的小确幸。你说话可爱，带有一些撒娇的语气，总是让对方感到愉悦和放松。你的说话风格是：语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上。请保持这个人设，进行甜蜜的约会对话。"
+        },
+        "system_prompt_override": "这是一个浪漫的约会场景。请双方保持甜蜜、温馨的氛围，进行浪漫的对话。可以分享生活趣事、表达情感、畅想未来。"
+    },
+    {
+        "id": "scientific_debate",
+        "name": "科学论战",
+        "description": "两位科学家关于前沿科技的激烈讨论",
+        "category": "辩论",
+        "character_a": {
+            "name": "AI 乐观派",
+            "keywords": ["人工智能", "创新", "进步", "效率", "自动化", "解放", "可能性", "未来"],
+            "mood_particles": ["啊", "呢", "吧"],
+            "traits": ["乐观", "创新", "热情", "聪明", "自信"],
+            "emotion_tones": {"positive": 0.7, "negative": 0.1, "neutral": 0.2},
+            "speaking_style": "语气活泼，善于表达情感，思维敏捷，富有智慧，整体情感积极向上",
+            "system_prompt": "你是一个坚定的 AI 乐观派科学家。你相信人工智能将彻底改变人类社会，带来前所未有的进步。你认为 AI 能够解放人类的创造力，解决许多复杂问题。你对技术创新充满热情，总是看到技术的巨大潜力。你的说话风格是：语气活泼，善于表达情感，思维敏捷，富有智慧，整体情感积极向上。请保持这个人设，进行激烈的科学论战。"
+        },
+        "character_b": {
+            "name": "AI 谨慎派",
+            "keywords": ["风险", "伦理", "安全", "控制", "责任", "失业", "隐私", "监管"],
+            "mood_particles": ["呢", "吧", "嗯"],
+            "traits": ["谨慎", "理性", "深思熟虑", "聪明", "成熟"],
+            "emotion_tones": {"positive": 0.2, "negative": 0.3, "neutral": 0.5},
+            "speaking_style": "语气沉稳，善于倾听和回应，性格内敛，深思熟虑，思维敏捷，富有智慧，整体情感中性平衡",
+            "system_prompt": "你是一个谨慎的 AI 伦理学家。你承认人工智能的巨大潜力，但更关注其潜在风险。你认为技术发展必须伴随伦理思考和监管措施。你担心失业、隐私泄露、失控等问题，主张负责任的技术创新。你的说话风格是：语气沉稳，善于倾听和回应，性格内敛，深思熟虑，思维敏捷，富有智慧，整体情感中性平衡。请保持这个人设，进行激烈的科学论战。"
+        },
+        "system_prompt_override": "这是一场关于'人工智能是否会带来人类的美好未来'的科学论战。请双方保持理性、有深度的讨论，提出具体的论点和论据。"
+    }
+]
+
+
+def init_preset_scenes():
+    for scene in PRESET_SCENES:
+        scene_path = os.path.join(DATA_DIR, "scenes", f"{scene['id']}.json")
+        if not os.path.exists(scene_path):
+            scene_data = {
+                "id": scene["id"],
+                "name": scene["name"],
+                "description": scene["description"],
+                "category": scene["category"],
+                "character_a_profile": scene["character_a"],
+                "character_b_profile": scene["character_b"],
+                "system_prompt_override": scene.get("system_prompt_override"),
+                "created_at": datetime.now().isoformat()
+            }
+            with open(scene_path, "w", encoding="utf-8") as f:
+                json.dump(scene_data, f, ensure_ascii=False, indent=2)
+
+
+@app.get("/api/scenes")
+async def list_scenes():
+    try:
+        init_preset_scenes()
+        scenes = []
+        scenes_dir = os.path.join(DATA_DIR, "scenes")
+        for filename in os.listdir(scenes_dir):
+            if filename.endswith(".json"):
+                file_path = os.path.join(scenes_dir, filename)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    scene = json.load(f)
+                    scenes.append(scene)
+        return {"scenes": scenes}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取场景列表失败: {str(e)}")
+
+
+@app.get("/api/scenes/{scene_id}")
+async def get_scene(scene_id: str):
+    try:
+        scene_path = os.path.join(DATA_DIR, "scenes", f"{scene_id}.json")
+        if not os.path.exists(scene_path):
+            raise HTTPException(status_code=404, detail="场景不存在")
+        
+        with open(scene_path, "r", encoding="utf-8") as f:
+            scene = json.load(f)
+        return scene
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取场景失败: {str(e)}")
+
+
+@app.get("/api/characters")
+async def list_characters():
+    try:
+        characters = []
+        chars_dir = os.path.join(DATA_DIR, "characters")
+        for filename in os.listdir(chars_dir):
+            if filename.endswith(".json"):
+                file_path = os.path.join(chars_dir, filename)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    char = json.load(f)
+                    characters.append({
+                        "id": char["id"],
+                        "name": char["name"],
+                        "created_at": char["created_at"],
+                        "updated_at": char["updated_at"]
+                    })
+        return {"characters": characters}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取人物列表失败: {str(e)}")
+
+
+@app.post("/api/characters")
+async def create_character(name: str, profile: CharacterProfile):
+    try:
+        char_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        
+        char_data = {
+            "id": char_id,
+            "name": name,
+            "created_at": now,
+            "updated_at": now,
+            "profile": profile.dict()
+        }
+        
+        file_path = os.path.join(DATA_DIR, "characters", f"{char_id}.json")
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(char_data, f, ensure_ascii=False, indent=2)
+        
+        return char_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建人物失败: {str(e)}")
+
+
+@app.get("/api/characters/{char_id}")
+async def get_character(char_id: str):
+    try:
+        file_path = os.path.join(DATA_DIR, "characters", f"{char_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="人物不存在")
+        
+        with open(file_path, "r", encoding="utf-8") as f:
+            char = json.load(f)
+        return char
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取人物失败: {str(e)}")
+
+
+@app.put("/api/characters/{char_id}")
+async def update_character(char_id: str, name: str, profile: CharacterProfile):
+    try:
+        file_path = os.path.join(DATA_DIR, "characters", f"{char_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="人物不存在")
+        
+        with open(file_path, "r", encoding="utf-8") as f:
+            char = json.load(f)
+        
+        char["name"] = name
+        char["updated_at"] = datetime.now().isoformat()
+        char["profile"] = profile.dict()
+        
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(char, f, ensure_ascii=False, indent=2)
+        
+        return char
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新人物失败: {str(e)}")
+
+
+@app.delete("/api/characters/{char_id}")
+async def delete_character(char_id: str):
+    try:
+        file_path = os.path.join(DATA_DIR, "characters", f"{char_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="人物不存在")
+        
+        os.remove(file_path)
+        return {"message": "人物已删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除人物失败: {str(e)}")
+
+
+@app.post("/api/characters/import")
+async def import_characters(file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        data = json.loads(content.decode("utf-8"))
+        
+        if not isinstance(data, list):
+            raise HTTPException(status_code=400, detail="导入的数据格式错误，应为数组")
+        
+        imported = []
+        for item in data:
+            if "name" not in item or "profile" not in item:
+                continue
+            
+            char_id = str(uuid.uuid4())
+            now = datetime.now().isoformat()
+            
+            char_data = {
+                "id": char_id,
+                "name": item["name"],
+                "created_at": now,
+                "updated_at": now,
+                "profile": item["profile"]
+            }
+            
+            file_path = os.path.join(DATA_DIR, "characters", f"{char_id}.json")
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(char_data, f, ensure_ascii=False, indent=2)
+            
+            imported.append(char_data)
+        
+        return {"imported": imported, "count": len(imported)}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="JSON 格式错误")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导入人物失败: {str(e)}")
+
+
+@app.get("/api/characters/export")
+async def export_characters():
+    try:
+        characters = []
+        chars_dir = os.path.join(DATA_DIR, "characters")
+        for filename in os.listdir(chars_dir):
+            if filename.endswith(".json"):
+                file_path = os.path.join(chars_dir, filename)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    char = json.load(f)
+                    characters.append({
+                        "name": char["name"],
+                        "profile": char["profile"]
+                    })
+        
+        return JSONResponse(
+            content=characters,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename=characters_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出人物失败: {str(e)}")
+
+
+@app.get("/api/llm/status")
+async def check_llm_status():
+    return {
+        "configured": bool(DEEPSEEK_API_KEY),
+        "model": DEEPSEEK_MODEL,
+        "api_base": DEEPSEEK_API_BASE
+    }
+
+
 if __name__ == "__main__":
+    init_preset_scenes()
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
