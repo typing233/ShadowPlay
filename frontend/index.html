@@ -315,7 +315,7 @@
         async function analyzeCharacter(charId) {
             const nameInput = document.getElementById(`char-${charId.toLowerCase()}-name`);
             const textInput = document.getElementById(`char-${charId.toLowerCase()}-text`);
-            const profileDiv = document.getElementById(`char-${charId}-profile`);
+            const profileDiv = document.getElementById(`char-${charId.toLowerCase()}-profile`);
             
             const text = textInput.value.trim();
             if (text.length < 10) {
@@ -358,9 +358,9 @@
         }
         
         function displayProfile(charId, profile) {
-            const keywordsDiv = document.getElementById(`char-${charId}-keywords`);
-            const traitsDiv = document.getElementById(`char-${charId}-traits`);
-            const emotionsDiv = document.getElementById(`char-${charId}-emotions`);
+            const keywordsDiv = document.getElementById(`char-${charId.toLowerCase()}-keywords`);
+            const traitsDiv = document.getElementById(`char-${charId.toLowerCase()}-traits`);
+            const emotionsDiv = document.getElementById(`char-${charId.toLowerCase()}-emotions`);
             
             keywordsDiv.innerHTML = profile.keywords.slice(0, 8).map(keyword => 
                 `<span class="px-2 py-1 bg-purple-900/50 text-purple-300 text-xs rounded-full">${keyword}</span>`
