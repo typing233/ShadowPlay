@@ -131,6 +131,22 @@
             border-color: #667eea;
             box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
         }
+        
+        .history-card {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .history-card:hover {
+            border-color: rgba(34, 197, 94, 0.8);
+            box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+        }
+        
+        .script-tag {
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.2) 0%, rgba(245, 158, 11, 0.2) 100%);
+            border: 1px solid rgba(251, 191, 36, 0.4);
+        }
     </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white">
@@ -139,7 +155,7 @@
             <h1 class="text-4xl font-bold mb-2 bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">
                 ShadowPlay
             </h1>
-            <p class="text-gray-400 text-lg">人格复刻与思想对撞沙盒 - 支持规则模式与 LLM 模式</p>
+            <p class="text-gray-400 text-lg">人格复刻与思想对撞沙盒 - v2.0.0</p>
             
             <div class="mt-4 flex justify-center items-center gap-4 flex-wrap">
                 <div id="webgpu-status" class="flex items-center gap-2 px-4 py-2 rounded-full text-sm">
@@ -168,6 +184,9 @@
                 <button onclick="switchTab('scenes')" id="tab-scenes" class="px-6 py-2 rounded-lg font-medium transition bg-gray-800/50 hover:bg-gray-700/50">
                     🎭 场景模板
                 </button>
+                <button onclick="switchTab('history')" id="tab-history" class="px-6 py-2 rounded-lg font-medium transition bg-gray-800/50 hover:bg-gray-700/50">
+                    📜 对话历史
+                </button>
             </div>
 
             <div id="create-section">
@@ -188,7 +207,7 @@
                             </button>
                         </div>
                         
-                        <textarea id="char-a-text" rows="8" placeholder="粘贴人物A的文本描述...&#10;&#10;例如：&#10;他是一个勇敢而聪明的探险家，总是充满热情地探索未知的世界。他善良、温柔，对朋友非常忠诚。在面对困难时，他从不退缩，总是乐观地寻找解决办法。他常说：'冒险才是生活的真谛啊！让我们一起去探索吧！'"
+                        <textarea id="char-a-text" rows="8" placeholder="粘贴人物A的文本描述...&#10;&#10;例如：&#10;他是一个勇敢而聪明的探险家，总是充满热情地探索未知的世界。他善良、温柔，对朋友非常忠诚。在面对困难时，他从不退缩，总是乐观地寻找解决办法。"
                             class="w-full bg-gray-800/50 border border-gray-600 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition textarea-focus resize-none"></textarea>
                         
                         <div class="mt-4 flex gap-3">
@@ -226,7 +245,7 @@
                             </button>
                         </div>
                         
-                        <textarea id="char-b-text" rows="8" placeholder="粘贴人物B的文本描述...&#10;&#10;例如：&#10;她是一个内向而深思熟虑的哲学家，总是在思考生命的意义。她聪明、理性，对待问题非常认真。她说话时总是带着淡淡的忧伤，喜欢用'呢'、'吧'等温和的语气助词。她常说：'真正的智慧在于认识到自己的无知呢。让我们慢慢思考吧。'"
+                        <textarea id="char-b-text" rows="8" placeholder="粘贴人物B的文本描述...&#10;&#10;例如：&#10;她是一个内向而深思熟虑的哲学家，总是在思考生命的意义。她聪明、理性，对待问题非常认真。她说话时总是带着淡淡的忧伤，喜欢用'呢'、'吧'等温和的语气助词。"
                             class="w-full bg-gray-800/50 border border-gray-600 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500 transition textarea-focus resize-none"></textarea>
                         
                         <div class="mt-4 flex gap-3">
@@ -281,14 +300,19 @@
             </div>
 
             <div id="scenes-section" class="hidden">
-                <h2 class="text-2xl font-semibold mb-6 text-center text-gray-200">场景模板</h2>
+                <h2 class="text-2xl font-semibold mb-6 text-center text-gray-200">场景模板管理</h2>
                 
                 <div class="character-card rounded-2xl p-6">
                     <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
                         <h3 class="text-lg font-medium text-gray-300">预设场景</h3>
-                        <button onclick="refreshScenes()" class="px-4 py-2 bg-gray-600/50 hover:bg-gray-600 rounded-lg transition">
-                            🔄 刷新
-                        </button>
+                        <div class="flex gap-2">
+                            <button onclick="openSceneCreator()" class="px-4 py-2 bg-purple-600/50 hover:bg-purple-600 rounded-lg transition">
+                                ➕ 创建场景
+                            </button>
+                            <button onclick="refreshScenes()" class="px-4 py-2 bg-gray-600/50 hover:bg-gray-600 rounded-lg transition">
+                                🔄 刷新
+                            </button>
+                        </div>
                     </div>
                     
                     <div id="scenes-list" class="grid md:grid-cols-2 gap-4">
@@ -305,29 +329,31 @@
                     </div>
                 </div>
             </div>
-        </section>
 
-        <section class="mb-8 flex justify-center gap-4 flex-wrap">
-            <button onclick="startDialogue()" id="start-btn" 
-                class="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-3 px-8 rounded-full text-lg transition transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed glow-effect"
-                disabled>
-                🚀 开始对话
-            </button>
-            <button onclick="pauseDialogue()" id="pause-btn" 
-                class="bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-3 px-8 rounded-full text-lg transition transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed"
-                disabled>
-                ⏸️ 暂停
-            </button>
-            <button onclick="clearDialogue()" 
-                class="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-bold py-3 px-8 rounded-full text-lg transition transform hover:scale-105 active:scale-95">
-                🗑️ 清空
-            </button>
+            <div id="history-section" class="hidden">
+                <h2 class="text-2xl font-semibold mb-6 text-center text-gray-200">对话历史</h2>
+                
+                <div class="character-card rounded-2xl p-6">
+                    <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
+                        <h3 class="text-lg font-medium text-gray-300">历史对话记录</h3>
+                        <button onclick="refreshHistory()" class="px-4 py-2 bg-gray-600/50 hover:bg-gray-600 rounded-lg transition">
+                            🔄 刷新
+                        </button>
+                    </div>
+                    
+                    <div id="history-list" class="space-y-4">
+                        <div class="text-center text-gray-500 py-8">
+                            加载中...
+                        </div>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <section class="settings-section mb-8">
             <div class="bg-gray-800/30 rounded-xl p-4">
                 <h3 class="text-lg font-medium mb-4 text-gray-300">对话设置</h3>
-                <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
                     <div>
                         <label class="block text-sm text-gray-400 mb-2">对话轮数</label>
                         <select id="rounds-select" class="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500">
@@ -359,6 +385,13 @@
                             <option value="rule" selected>规则模式 (本地)</option>
                             <option value="llm">LLM 模式 (Deepseek)</option>
                         </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">使用场景脚本</label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="use-script" class="w-5 h-5 rounded bg-gray-700 border-gray-600 text-purple-600 focus:ring-purple-500">
+                            <span class="text-gray-300">启用预设脚本</span>
+                        </label>
                     </div>
                 </div>
                 
@@ -413,11 +446,32 @@
                     
                     <div class="mt-4 p-3 bg-yellow-900/20 rounded-lg border border-yellow-600/30">
                         <p class="text-sm text-yellow-400">
-                            ⚠️ 提示：LLM 模式需要配置 Deepseek API 密钥。请设置环境变量 <code class="bg-gray-800 px-2 py-1 rounded">DEEPSEEK_API_KEY</code>
+                            ⚠️ 提示：LLM 模式需要消耗 API 额度。请设置环境变量 <code class="bg-gray-800 px-2 py-1 rounded">DEEPSEEK_API_KEY</code>
                         </p>
                     </div>
                 </div>
             </div>
+        </section>
+
+        <section class="mb-8 flex justify-center gap-4 flex-wrap">
+            <button onclick="startDialogue()" id="start-btn" 
+                class="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-3 px-8 rounded-full text-lg transition transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed glow-effect"
+                disabled>
+                🚀 开始对话
+            </button>
+            <button onclick="pauseDialogue()" id="pause-btn" 
+                class="bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-3 px-8 rounded-full text-lg transition transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed"
+                disabled>
+                ⏸️ 暂停
+            </button>
+            <button onclick="clearDialogue()" 
+                class="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-bold py-3 px-8 rounded-full text-lg transition transform hover:scale-105 active:scale-95">
+                🗑️ 清空
+            </button>
+            <button onclick="saveCurrentDialogue()" id="save-dialogue-btn" 
+                class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 px-8 rounded-full text-lg transition transform hover:scale-105 active:scale-95">
+                💾 保存对话
+            </button>
         </section>
 
         <section id="dialogue-section" class="mb-8">
@@ -457,7 +511,7 @@
         </section>
 
         <footer class="text-center py-6 text-gray-500 text-sm">
-            <p>ShadowPlay v1.1.0 - 支持规则模式与 LLM 模式</p>
+            <p>ShadowPlay v2.0.0 - 支持规则模式与 LLM 模式</p>
             <p class="mt-2">所有数据仅在本地处理，人物库数据保存在服务器</p>
         </footer>
     </div>
@@ -501,6 +555,107 @@
         </div>
     </div>
 
+    <div id="scene-modal" class="modal">
+        <div class="modal-content w-full max-w-4xl mx-4 p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="scene-modal-title" class="text-xl font-bold text-gray-200">创建场景</h3>
+                <button onclick="closeSceneModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div class="space-y-6">
+                <div class="grid md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">场景名称</label>
+                        <input type="text" id="scene-name" placeholder="例如：哲学辩论"
+                            class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">场景分类</label>
+                        <select id="scene-category" class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500">
+                            <option value="辩论">辩论</option>
+                            <option value="面试">面试</option>
+                            <option value="社交">社交</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">场景描述</label>
+                    <textarea id="scene-description" rows="3" placeholder="描述这个场景的背景和目的..."
+                        class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 resize-none"></textarea>
+                </div>
+
+                <div class="border-t border-gray-700 pt-4">
+                    <h4 class="text-md font-medium text-gray-300 mb-4">🎭 场景脚本配置（可选）</h4>
+                    <p class="text-sm text-gray-500 mb-4">设置预设的开场白、过渡语和结束语，对话时会自动使用这些预设内容。</p>
+                    
+                    <div class="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-2">人物 A 开场白</label>
+                            <textarea id="script-opening-a" rows="2" placeholder="例如：你好！很高兴和你讨论这个话题..."
+                                class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 resize-none text-sm"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-2">人物 B 开场白</label>
+                            <textarea id="script-opening-b" rows="2" placeholder="例如：你好。让我先听听你的想法..."
+                                class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 resize-none text-sm"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <label class="block text-sm text-gray-400 mb-2">过渡语（每行一个，对话中可使用）</label>
+                        <textarea id="script-transitions" rows="3" placeholder="例如：&#10;关于这个问题，我想从另一个角度来谈谈...&#10;你说得有道理，但我认为..."
+                            class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 resize-none text-sm"></textarea>
+                    </div>
+                    
+                    <div class="grid md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-2">人物 A 结束语</label>
+                            <textarea id="script-closing-a" rows="2" placeholder="例如：无论如何，感谢今天的讨论！"
+                                class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 resize-none text-sm"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-400 mb-2">人物 B 结束语</label>
+                            <textarea id="script-closing-b" rows="2" placeholder="例如：感谢你的分享，这场讨论让我思考了很多。"
+                                class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 resize-none text-sm"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <label class="block text-sm text-gray-400 mb-2">话题建议（每行一个，用于参考）</label>
+                        <textarea id="script-topics" rows="2" placeholder="例如：&#10;人生的意义&#10;幸福的本质"
+                            class="w-full bg-gray-800/50 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 resize-none text-sm"></textarea>
+                    </div>
+                </div>
+
+                <div class="flex gap-3 justify-end pt-4 border-t border-gray-700">
+                    <button onclick="closeSceneModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition">
+                        取消
+                    </button>
+                    <button onclick="saveScene()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition">
+                        保存场景
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="history-detail-modal" class="modal">
+        <div class="modal-content w-full max-w-4xl mx-4 p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="history-detail-title" class="text-xl font-bold text-gray-200">对话详情</h3>
+                <div class="flex items-center gap-2">
+                    <button onclick="exportCurrentHistory()" class="px-3 py-1 bg-blue-600/50 hover:bg-blue-600 rounded-lg transition text-sm">
+                        📤 导出
+                    </button>
+                    <button onclick="closeHistoryDetailModal()" class="text-gray-400 hover:text-white text-2xl ml-2">&times;</button>
+                </div>
+            </div>
+            <div id="history-detail-content" class="space-y-4 max-h-[70vh] overflow-y-auto">
+            </div>
+        </div>
+    </div>
+
     <script>
         const API_BASE = '';
         
@@ -516,7 +671,12 @@
             roundCount: 0,
             maxRounds: 10,
             lastMessage: null,
-            timer: null
+            timer: null,
+            dialogueHistoryId: null,
+            sceneId: null,
+            sceneName: null,
+            sceneScript: null,
+            messages: []
         };
         
         let libraryCharacters = [];
@@ -524,6 +684,9 @@
         let selectedSceneId = null;
         let editingCharacterId = null;
         let librarySelectTarget = null;
+        let editingSceneId = null;
+        let currentHistoryId = null;
+        let historyList = [];
         
         document.getElementById('mode-select').addEventListener('change', function() {
             const llmSettings = document.getElementById('llm-settings');
@@ -618,7 +781,7 @@
         }
         
         function switchTab(tab) {
-            const tabs = ['create', 'library', 'scenes'];
+            const tabs = ['create', 'library', 'scenes', 'history'];
             tabs.forEach(t => {
                 document.getElementById(`tab-${t}`).className = t === tab 
                     ? 'tab-active px-6 py-2 rounded-lg font-medium transition'
@@ -630,6 +793,8 @@
                 refreshLibrary();
             } else if (tab === 'scenes') {
                 refreshScenes();
+            } else if (tab === 'history') {
+                refreshHistory();
             }
         }
         
@@ -978,6 +1143,7 @@
                     listDiv.innerHTML = `
                         <div class="col-span-full text-center text-gray-500 py-8">
                             <p class="text-lg mb-2">🎭 暂无场景</p>
+                            <p class="text-sm">点击"创建场景"按钮添加新场景</p>
                         </div>
                     `;
                     return;
@@ -993,17 +1159,28 @@
                                 </span>
                                 <h4 class="font-medium text-gray-200 inline">${scene.name}</h4>
                             </div>
-                            ${selectedSceneId === scene.id ? '<span class="text-purple-400">✓</span>' : ''}
+                            <div class="flex gap-1">
+                                ${scene.has_script ? '<span class="script-tag px-2 py-1 text-xs rounded-full text-yellow-300">📜 脚本</span>' : ''}
+                                ${selectedSceneId === scene.id ? '<span class="text-purple-400 ml-2">✓</span>' : ''}
+                            </div>
                         </div>
                         <p class="text-sm text-gray-400 mb-3">${scene.description}</p>
-                        <div class="flex gap-2 text-xs">
+                        <div class="flex gap-2 text-xs mb-3">
                             <span class="px-2 py-1 bg-blue-900/30 text-blue-300 rounded">
-                                ${scene.character_a_profile?.name || '角色A'}
+                                ${scene.character_a_name || '角色A'}
                             </span>
                             <span class="text-gray-500">VS</span>
                             <span class="px-2 py-1 bg-pink-900/30 text-pink-300 rounded">
-                                ${scene.character_b_profile?.name || '角色B'}
+                                ${scene.character_b_name || '角色B'}
                             </span>
+                        </div>
+                        <div class="flex gap-1 justify-end">
+                            <button onclick="event.stopPropagation(); editScene('${scene.id}')" class="px-2 py-1 bg-yellow-600/30 hover:bg-yellow-600 rounded text-xs transition" title="编辑">
+                                ✏️
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteScene('${scene.id}')" class="px-2 py-1 bg-red-600/30 hover:bg-red-600 rounded text-xs transition" title="删除">
+                                🗑️
+                            </button>
                         </div>
                     </div>
                 `).join('');
@@ -1030,13 +1207,19 @@
             }
             
             try {
-                const scene = scenes.find(s => s.id === selectedSceneId);
-                if (!scene) {
-                    throw new Error('场景不存在');
+                const response = await fetch(`${API_BASE}/api/scenes/${selectedSceneId}`);
+                if (!response.ok) {
+                    throw new Error('获取场景失败');
                 }
+                
+                const scene = await response.json();
                 
                 characterProfiles.A = scene.character_a_profile;
                 characterProfiles.B = scene.character_b_profile;
+                
+                dialogueState.sceneId = scene.id;
+                dialogueState.sceneName = scene.name;
+                dialogueState.sceneScript = scene.script;
                 
                 displayProfile('A', characterProfiles.A);
                 displayProfile('B', characterProfiles.B);
@@ -1060,6 +1243,409 @@
                 
             } catch (error) {
                 alert(`应用场景失败: ${error.message}`);
+            }
+        }
+        
+        function openSceneCreator() {
+            editingSceneId = null;
+            document.getElementById('scene-modal-title').textContent = '创建场景';
+            
+            document.getElementById('scene-name').value = '';
+            document.getElementById('scene-category').value = '辩论';
+            document.getElementById('scene-description').value = '';
+            document.getElementById('script-opening-a').value = '';
+            document.getElementById('script-opening-b').value = '';
+            document.getElementById('script-transitions').value = '';
+            document.getElementById('script-closing-a').value = '';
+            document.getElementById('script-closing-b').value = '';
+            document.getElementById('script-topics').value = '';
+            
+            document.getElementById('scene-modal').classList.add('active');
+        }
+        
+        async function editScene(sceneId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/scenes/${sceneId}`);
+                if (!response.ok) {
+                    throw new Error('获取场景失败');
+                }
+                
+                const scene = await response.json();
+                editingSceneId = sceneId;
+                
+                document.getElementById('scene-modal-title').textContent = '编辑场景';
+                document.getElementById('scene-name').value = scene.name || '';
+                document.getElementById('scene-category').value = scene.category || '其他';
+                document.getElementById('scene-description').value = scene.description || '';
+                
+                if (scene.script) {
+                    document.getElementById('script-opening-a').value = scene.script.opening_a || '';
+                    document.getElementById('script-opening-b').value = scene.script.opening_b || '';
+                    document.getElementById('script-transitions').value = (scene.script.transition_phrases || []).join('\n');
+                    document.getElementById('script-closing-a').value = scene.script.closing_a || '';
+                    document.getElementById('script-closing-b').value = scene.script.closing_b || '';
+                    document.getElementById('script-topics').value = (scene.script.topic_suggestions || []).join('\n');
+                } else {
+                    document.getElementById('script-opening-a').value = '';
+                    document.getElementById('script-opening-b').value = '';
+                    document.getElementById('script-transitions').value = '';
+                    document.getElementById('script-closing-a').value = '';
+                    document.getElementById('script-closing-b').value = '';
+                    document.getElementById('script-topics').value = '';
+                }
+                
+                document.getElementById('scene-modal').classList.add('active');
+                
+            } catch (error) {
+                alert(`加载场景失败: ${error.message}`);
+            }
+        }
+        
+        function closeSceneModal() {
+            document.getElementById('scene-modal').classList.remove('active');
+            editingSceneId = null;
+        }
+        
+        async function saveScene() {
+            const name = document.getElementById('scene-name').value.trim();
+            if (!name) {
+                alert('请输入场景名称');
+                return;
+            }
+            
+            const transitionsText = document.getElementById('script-transitions').value;
+            const topicsText = document.getElementById('script-topics').value;
+            
+            const sceneData = {
+                name: name,
+                description: document.getElementById('scene-description').value.trim(),
+                category: document.getElementById('scene-category').value,
+                character_a_profile: characterProfiles.A || {
+                    name: "角色A",
+                    keywords: [],
+                    mood_particles: [],
+                    traits: [],
+                    emotion_tones: {"positive": 0.33, "negative": 0.33, "neutral": 0.34},
+                    speaking_style: "",
+                    system_prompt: ""
+                },
+                character_b_profile: characterProfiles.B || {
+                    name: "角色B",
+                    keywords: [],
+                    mood_particles: [],
+                    traits: [],
+                    emotion_tones: {"positive": 0.33, "negative": 0.33, "neutral": 0.34},
+                    speaking_style: "",
+                    system_prompt: ""
+                },
+                script: {
+                    opening_a: document.getElementById('script-opening-a').value.trim() || null,
+                    opening_b: document.getElementById('script-opening-b').value.trim() || null,
+                    transition_phrases: transitionsText ? transitionsText.split('\n').filter(t => t.trim()) : [],
+                    closing_a: document.getElementById('script-closing-a').value.trim() || null,
+                    closing_b: document.getElementById('script-closing-b').value.trim() || null,
+                    topic_suggestions: topicsText ? topicsText.split('\n').filter(t => t.trim()) : []
+                }
+            };
+            
+            try {
+                let url = `${API_BASE}/api/scenes`;
+                let method = 'POST';
+                
+                if (editingSceneId) {
+                    url = `${API_BASE}/api/scenes/${editingSceneId}`;
+                    method = 'PUT';
+                }
+                
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(sceneData)
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '保存失败');
+                }
+                
+                closeSceneModal();
+                refreshScenes();
+                alert('保存成功！');
+                
+            } catch (error) {
+                alert(`保存失败: ${error.message}`);
+            }
+        }
+        
+        async function deleteScene(sceneId) {
+            if (!confirm('确定要删除这个场景吗？')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/scenes/${sceneId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '删除失败');
+                }
+                
+                if (selectedSceneId === sceneId) {
+                    selectedSceneId = null;
+                    document.getElementById('apply-scene-btn').disabled = true;
+                }
+                
+                refreshScenes();
+                alert('删除成功！');
+                
+            } catch (error) {
+                alert(`删除失败: ${error.message}`);
+            }
+        }
+        
+        async function refreshHistory() {
+            const listDiv = document.getElementById('history-list');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/dialogues`);
+                if (!response.ok) {
+                    throw new Error('获取对话列表失败');
+                }
+                
+                const data = await response.json();
+                historyList = data.dialogues || [];
+                
+                if (historyList.length === 0) {
+                    listDiv.innerHTML = `
+                        <div class="text-center text-gray-500 py-8">
+                            <p class="text-lg mb-2">📜 暂无历史对话</p>
+                            <p class="text-sm">开始对话后可以保存到历史记录</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                listDiv.innerHTML = historyList.map(history => `
+                    <div class="history-card rounded-lg p-4 cursor-pointer" onclick="viewHistoryDetail('${history.id}')">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h4 class="font-medium text-gray-200">${history.title}</h4>
+                                ${history.scene_name ? `<span class="inline-block px-2 py-1 text-xs rounded-full bg-purple-900/50 text-purple-300 mt-1">${history.scene_name}</span>` : ''}
+                            </div>
+                            <div class="flex gap-1">
+                                <button onclick="event.stopPropagation(); exportHistory('${history.id}')" class="px-2 py-1 bg-blue-600/30 hover:bg-blue-600 rounded text-xs transition" title="导出">
+                                    📤
+                                </button>
+                                <button onclick="event.stopPropagation(); deleteHistory('${history.id}')" class="px-2 py-1 bg-red-600/30 hover:bg-red-600 rounded text-xs transition" title="删除">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                        <div class="flex gap-4 text-xs text-gray-500">
+                            <span>${history.character_a_name} VS ${history.character_b_name}</span>
+                            <span>共 ${history.total_rounds} 轮</span>
+                            <span>${new Date(history.created_at).toLocaleString()}</span>
+                        </div>
+                    </div>
+                `).join('');
+                
+            } catch (error) {
+                listDiv.innerHTML = `
+                    <div class="text-center text-red-400 py-8">
+                        加载失败: ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        async function viewHistoryDetail(historyId) {
+            currentHistoryId = historyId;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/dialogues/${historyId}`);
+                if (!response.ok) {
+                    throw new Error('获取对话详情失败');
+                }
+                
+                const history = await response.json();
+                
+                document.getElementById('history-detail-title').textContent = history.title;
+                
+                let contentHtml = `
+                    <div class="bg-gray-800/50 rounded-lg p-4 mb-4">
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-500">人物 A:</span>
+                                <span class="text-blue-400 ml-2">${history.character_a_name}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">人物 B:</span>
+                                <span class="text-pink-400 ml-2">${history.character_b_name}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">场景:</span>
+                                <span class="text-purple-400 ml-2">${history.scene_name || '无'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">总轮数:</span>
+                                <span class="text-gray-300 ml-2">${history.total_rounds}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">创建时间:</span>
+                                <span class="text-gray-300 ml-2">${new Date(history.created_at).toLocaleString()}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">更新时间:</span>
+                                <span class="text-gray-300 ml-2">${new Date(history.updated_at).toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                if (history.messages && history.messages.length > 0) {
+                    contentHtml += `
+                        <h4 class="text-md font-medium text-gray-300 mb-3">对话内容</h4>
+                        <div class="space-y-3">
+                    `;
+                    
+                    history.messages.forEach(msg => {
+                        const isA = msg.speaker === 'A';
+                        contentHtml += `
+                            <div class="flex ${isA ? 'justify-start' : 'justify-end'}">
+                                <div class="max-w-[80%]">
+                                    <div class="text-xs ${isA ? 'text-blue-400' : 'text-pink-400'} mb-1">
+                                        第 ${msg.round_number + 1} 轮 - ${isA ? history.character_a_name : history.character_b_name}
+                                    </div>
+                                    <div class="${isA ? 'message-a' : 'message-b'} p-3 rounded-xl text-white text-sm">
+                                        ${msg.message}
+                                    </div>
+                                    <div class="text-xs text-gray-500 mt-1">
+                                        ${new Date(msg.timestamp).toLocaleTimeString()}
+                                        <span class="ml-2">[${msg.generation_mode}]</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    contentHtml += `</div>`;
+                } else {
+                    contentHtml += `<p class="text-gray-500 text-center py-4">暂无对话内容</p>`;
+                }
+                
+                document.getElementById('history-detail-content').innerHTML = contentHtml;
+                document.getElementById('history-detail-modal').classList.add('active');
+                
+            } catch (error) {
+                alert(`加载对话详情失败: ${error.message}`);
+            }
+        }
+        
+        function closeHistoryDetailModal() {
+            document.getElementById('history-detail-modal').classList.remove('active');
+            currentHistoryId = null;
+        }
+        
+        async function exportHistory(historyId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/dialogues/${historyId}/export`);
+                if (!response.ok) {
+                    throw new Error('导出失败');
+                }
+                
+                const data = await response.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `dialogue_${historyId}_${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+            } catch (error) {
+                alert(`导出失败: ${error.message}`);
+            }
+        }
+        
+        async function exportCurrentHistory() {
+            if (currentHistoryId) {
+                await exportHistory(currentHistoryId);
+            }
+        }
+        
+        async function deleteHistory(historyId) {
+            if (!confirm('确定要删除这条对话记录吗？')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/dialogues/${historyId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '删除失败');
+                }
+                
+                refreshHistory();
+                alert('删除成功！');
+                
+            } catch (error) {
+                alert(`删除失败: ${error.message}`);
+            }
+        }
+        
+        async function saveCurrentDialogue() {
+            if (dialogueState.messages.length === 0) {
+                alert('当前没有对话可保存');
+                return;
+            }
+            
+            const title = prompt('请输入对话标题:', 
+                `${characterProfiles.A?.name || '人物A'} vs ${characterProfiles.B?.name || '人物B'}`);
+            
+            if (!title) {
+                return;
+            }
+            
+            try {
+                let dialogueId = dialogueState.dialogueHistoryId;
+                
+                if (!dialogueId) {
+                    const createResponse = await fetch(
+                        `${API_BASE}/api/dialogues?character_a_name=${encodeURIComponent(characterProfiles.A?.name || '人物A')}&character_b_name=${encodeURIComponent(characterProfiles.B?.name || '人物B')}&scene_id=${encodeURIComponent(dialogueState.sceneId || '')}&scene_name=${encodeURIComponent(dialogueState.sceneName || '')}&title=${encodeURIComponent(title)}`,
+                        { method: 'POST' }
+                    );
+                    
+                    if (!createResponse.ok) {
+                        const error = await createResponse.json();
+                        throw new Error(error.detail || '创建对话记录失败');
+                    }
+                    
+                    const createData = await createResponse.json();
+                    dialogueId = createData.id;
+                }
+                
+                for (const msg of dialogueState.messages) {
+                    await fetch(`${API_BASE}/api/dialogues/${dialogueId}/messages`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(msg)
+                    });
+                }
+                
+                dialogueState.dialogueHistoryId = dialogueId;
+                alert('保存成功！');
+                
+            } catch (error) {
+                alert(`保存失败: ${error.message}`);
             }
         }
         
@@ -1162,6 +1748,8 @@
             dialogueState.lastMessage = null;
             dialogueState.isRunning = true;
             dialogueState.isPaused = false;
+            dialogueState.messages = [];
+            dialogueState.dialogueHistoryId = null;
             
             document.getElementById('start-btn').disabled = true;
             document.getElementById('pause-btn').disabled = false;
@@ -1221,6 +1809,8 @@
             
             try {
                 const mode = document.getElementById('mode-select').value;
+                const useScript = document.getElementById('use-script').checked;
+                
                 const llmConfig = mode === 'llm' ? {
                     temperature: parseFloat(document.getElementById('temp-slider').value),
                     max_tokens: parseInt(document.getElementById('tokens-slider').value),
@@ -1228,6 +1818,8 @@
                     frequency_penalty: 0.0,
                     presence_penalty: 0.0
                 } : null;
+                
+                const contextMessages = dialogueState.messages.slice(-10);
                 
                 const response = await fetch(`${API_BASE}/api/dialogue`, {
                     method: 'POST',
@@ -1240,7 +1832,12 @@
                         last_message: dialogueState.lastMessage,
                         speaker: speaker,
                         generation_mode: mode,
-                        llm_config: llmConfig
+                        llm_config: llmConfig,
+                        context_messages: contextMessages,
+                        use_script: useScript,
+                        scene_script: dialogueState.sceneScript,
+                        current_round: dialogueState.roundCount,
+                        total_rounds: dialogueState.maxRounds
                     })
                 });
                 
@@ -1251,8 +1848,20 @@
                 
                 const result = await response.json();
                 
-                const modeIndicator = result.generation_mode === 'llm' ? ' [LLM]' : ' [规则]';
-                addMessage(speaker, result.message + modeIndicator);
+                const modeIndicator = result.generation_mode === 'llm' ? ' [LLM]' : 
+                                     result.generation_mode === 'script' ? ' [脚本]' : ' [规则]';
+                
+                const messageContent = result.message + modeIndicator;
+                
+                addMessage(speaker, messageContent, result.generation_mode);
+                
+                dialogueState.messages.push({
+                    speaker: speaker,
+                    message: result.message,
+                    timestamp: new Date().toISOString(),
+                    round_number: dialogueState.roundCount,
+                    generation_mode: result.generation_mode
+                });
                 
                 dialogueState.lastMessage = result.message;
                 dialogueState.currentSpeaker = listener;
@@ -1260,7 +1869,7 @@
                 
             } catch (error) {
                 console.error('Dialogue error:', error);
-                addMessage(speaker, `[错误] ${error.message}`);
+                addMessage(speaker, `[错误] ${error.message}`, 'error');
             }
             
             document.getElementById(`char-${speaker.toLowerCase()}-speaking`).classList.add('hidden');
@@ -1272,7 +1881,7 @@
             }
         }
         
-        function addMessage(speaker, message) {
+        function addMessage(speaker, message, generationMode) {
             const messagesDiv = document.getElementById(`dialogue-${speaker.toLowerCase()}-messages`);
             const otherDiv = document.getElementById(`dialogue-${speaker === 'A' ? 'b' : 'a'}-messages`);
             

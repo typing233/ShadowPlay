@@ -1,0 +1,35 @@
+{
+  "id": "c528eddd-8c49-4198-95d1-806e32bc440c",
+  "title": "AI 乐观派 vs AI 谨慎派",
+  "character_a_name": "AI 乐观派",
+  "character_b_name": "AI 谨慎派",
+  "scene_id": "scientific_debate",
+  "scene_name": "科学论战",
+  "messages": [
+    {
+      "speaker": "A",
+      "message": "效率这个话题很有趣，你怎么看呢",
+      "timestamp": "2026-04-20T12:34:38.020Z",
+      "round_number": 0,
+      "generation_mode": "rule"
+    },
+    {
+      "speaker": "B",
+      "message": "你的话让我深受启发，让我想想该怎么回应呢",
+      "timestamp": "2026-04-20T12:34:40.132Z",
+      "round_number": 1,
+      "generation_mode": "rule"
+    },
+    {
+      "speaker": "A",
+      "message": "你刚才说的话让我想到了很多...吧",
+      "timestamp": "2026-04-20T12:34:42.643Z",
+      "round_number": 2,
+      "generation_mode": "rule"
+    }
+  ],
+  "context_summary": null,
+  "created_at": "2026-04-20T20:34:42.706660",
+  "updated_at": "2026-04-20T20:34:43.011014",
+  "total_rounds": 3
+}

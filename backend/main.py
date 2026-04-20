@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -12,7 +12,7 @@ from collections import Counter
 import aiohttp
 from datetime import datetime
 
-app = FastAPI(title="ShadowPlay - 人格复刻与思想对撞沙盒", version="1.0.0")
+app = FastAPI(title="ShadowPlay - 人格复刻与思想对撞沙盒", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +29,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(os.path.join(DATA_DIR, "characters"), exist_ok=True)
 os.makedirs(os.path.join(DATA_DIR, "scenes"), exist_ok=True)
+os.makedirs(os.path.join(DATA_DIR, "dialogues"), exist_ok=True)
 
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -83,6 +84,57 @@ class LLMConfig(BaseModel):
     presence_penalty: float = 0.0
 
 
+class DialogueMessage(BaseModel):
+    speaker: str
+    message: str
+    timestamp: str
+    round_number: int
+    generation_mode: str
+
+
+class DialogueHistory(BaseModel):
+    id: str
+    title: str
+    character_a_name: str
+    character_b_name: str
+    scene_id: Optional[str] = None
+    scene_name: Optional[str] = None
+    messages: List[DialogueMessage]
+    context_summary: Optional[str] = None
+    created_at: str
+    updated_at: str
+    total_rounds: int
+
+
+class SceneScript(BaseModel):
+    opening_a: Optional[str] = None
+    opening_b: Optional[str] = None
+    transition_phrases: List[str] = []
+    closing_a: Optional[str] = None
+    closing_b: Optional[str] = None
+    topic_suggestions: List[str] = []
+
+
+class SceneTemplateCreate(BaseModel):
+    name: str
+    description: str
+    category: str
+    character_a_profile: CharacterProfile
+    character_b_profile: CharacterProfile
+    system_prompt_override: Optional[str] = None
+    script: Optional[SceneScript] = None
+
+
+class SceneTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    character_a_profile: Optional[CharacterProfile] = None
+    character_b_profile: Optional[CharacterProfile] = None
+    system_prompt_override: Optional[str] = None
+    script: Optional[SceneScript] = None
+
+
 class DialogueRequest(BaseModel):
     character_a_profile: CharacterProfile
     character_b_profile: CharacterProfile
@@ -90,12 +142,21 @@ class DialogueRequest(BaseModel):
     speaker: str
     generation_mode: str = "rule"
     llm_config: Optional[LLMConfig] = None
+    dialogue_history_id: Optional[str] = None
+    context_messages: Optional[List[DialogueMessage]] = None
+    use_script: bool = False
+    scene_script: Optional[SceneScript] = None
+    current_round: int = 0
+    total_rounds: int = 10
 
 
 class DialogueResponse(BaseModel):
     message: str
     speaker: str
     generation_mode: str
+    dialogue_history_id: Optional[str] = None
+    is_opening: bool = False
+    is_closing: bool = False
 
 
 class CharacterLibraryItem(BaseModel):
@@ -104,17 +165,6 @@ class CharacterLibraryItem(BaseModel):
     created_at: str
     updated_at: str
     profile: CharacterProfile
-
-
-class SceneTemplate(BaseModel):
-    id: str
-    name: str
-    description: str
-    category: str
-    character_a_profile: CharacterProfile
-    character_b_profile: CharacterProfile
-    system_prompt_override: Optional[str] = None
-    created_at: str
 
 
 def extract_keywords(text: str, top_n: int = 20) -> List[str]:
@@ -250,6 +300,36 @@ def generate_system_prompt(name: Optional[str], keywords: List[str], traits: Lis
     return "".join(prompt_parts)
 
 
+def build_context_prompt(messages: List[DialogueMessage], max_context: int = 10) -> str:
+    if not messages:
+        return ""
+    
+    recent_messages = messages[-max_context:] if len(messages) > max_context else messages
+    context_parts = ["以下是之前的对话历史："]
+    
+    for msg in recent_messages:
+        context_parts.append(f"[{msg.speaker}]: {msg.message}")
+    
+    context_parts.append("\n请根据以上对话历史，继续自然地回应对方。")
+    return "\n".join(context_parts)
+
+
+def get_script_message(script: SceneScript, speaker: str, current_round: int, total_rounds: int) -> Optional[str]:
+    if current_round == 0:
+        if speaker == "A" and script.opening_a:
+            return script.opening_a
+        if speaker == "B" and script.opening_b:
+            return script.opening_b
+    
+    if current_round >= total_rounds - 1:
+        if speaker == "A" and script.closing_a:
+            return script.closing_a
+        if speaker == "B" and script.closing_b:
+            return script.closing_b
+    
+    return None
+
+
 @app.post("/api/analyze", response_model=CharacterProfile)
 async def analyze_character(input_data: TextInput):
     try:
@@ -287,10 +367,16 @@ async def analyze_character(input_data: TextInput):
 
 
 def generate_response(speaker_profile: CharacterProfile, listener_profile: CharacterProfile, 
-                      last_message: Optional[str] = None) -> str:
+                      last_message: Optional[str] = None, 
+                      context_messages: Optional[List[DialogueMessage]] = None) -> str:
     import random
     
     responses = []
+    
+    if context_messages and len(context_messages) > 0:
+        last_ctx_msg = context_messages[-1]
+        responses.append(f"关于你刚才说的'{last_ctx_msg.message[:20]}...'，我有一些想法。")
+        responses.append("你说得很有道理，让我想想...")
     
     if speaker_profile.keywords:
         keyword = random.choice(speaker_profile.keywords[:5])
@@ -360,7 +446,7 @@ async def root():
     index_path = os.path.join(FRONTEND_DIR, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
-    return {"message": "ShadowPlay API 服务运行中", "version": "1.0.0"}
+    return {"message": "ShadowPlay API 服务运行中", "version": "2.0.0"}
 
 
 @app.get("/api/health")
@@ -428,11 +514,19 @@ async def generate_llm_dialogue(request: DialogueRequest):
         
         system_prompt = speaker_profile.system_prompt
         
-        user_message = ""
+        user_message_parts = []
+        
+        if request.context_messages and len(request.context_messages) > 0:
+            context_prompt = build_context_prompt(request.context_messages)
+            user_message_parts.append(context_prompt)
+        
         if request.last_message:
-            user_message = f"对方刚刚说：{request.last_message}\n\n请你以{speaker_profile.name or '说话者'}的身份回应对方。保持你的人格特质，回答要简短有力，富有个性。"
+            user_message_parts.append(f"对方刚刚说：{request.last_message}")
+            user_message_parts.append(f"请你以{speaker_profile.name or '说话者'}的身份回应对方。保持你的人格特质，回答要简短有力，富有个性。")
         else:
-            user_message = f"你是{speaker_profile.name or '说话者'}，正在与{listener_profile.name or '对方'}进行对话。请你先开口，发起一个有趣的话题。保持你的人格特质，回答要简短有力，富有个性。"
+            user_message_parts.append(f"你是{speaker_profile.name or '说话者'}，正在与{listener_profile.name or '对方'}进行对话。请你先开口，发起一个有趣的话题。保持你的人格特质，回答要简短有力，富有个性。")
+        
+        user_message = "\n\n".join(user_message_parts)
         
         response = await call_deepseek_api(
             system_prompt,
@@ -454,6 +548,32 @@ async def generate_llm_dialogue(request: DialogueRequest):
 @app.post("/api/dialogue", response_model=DialogueResponse)
 async def generate_dialogue(request: DialogueRequest):
     try:
+        is_opening = False
+        is_closing = False
+        script_message = None
+        
+        if request.use_script and request.scene_script:
+            script_message = get_script_message(
+                request.scene_script,
+                request.speaker,
+                request.current_round,
+                request.total_rounds
+            )
+            if script_message:
+                if request.current_round == 0:
+                    is_opening = True
+                elif request.current_round >= request.total_rounds - 1:
+                    is_closing = True
+        
+        if script_message:
+            return DialogueResponse(
+                message=script_message,
+                speaker=request.speaker,
+                generation_mode="script",
+                is_opening=is_opening,
+                is_closing=is_closing
+            )
+        
         if request.generation_mode == "llm":
             return await generate_llm_dialogue(request)
         
@@ -463,7 +583,8 @@ async def generate_dialogue(request: DialogueRequest):
         response = generate_response(
             speaker_profile,
             listener_profile,
-            request.last_message
+            request.last_message,
+            request.context_messages
         )
         
         return DialogueResponse(
@@ -501,7 +622,20 @@ PRESET_SCENES = [
             "speaking_style": "语气沉稳，善于倾听和回应，性格内敛，深思熟虑，思维敏捷，富有智慧，整体情感较为深沉",
             "system_prompt": "你是一个深刻的悲观主义者。你看透了生命的虚无和痛苦，认为人生本质上是无意义的。你善于深入思考存在的本质，对人类的困境有清醒的认识。你的说话风格是：语气沉稳，善于倾听和回应，性格内敛，深思熟虑，思维敏捷，富有智慧，整体情感较为深沉。请保持这个人格特质，与对方进行辩论。"
         },
-        "system_prompt_override": "这是一场关于'人生是否有意义'的哲学辩论。请双方保持各自的人格特质，进行激烈但有深度的思想交锋。"
+        "system_prompt_override": "这是一场关于'人生是否有意义'的哲学辩论。请双方保持各自的人格特质，进行激烈但有深度的思想交锋。",
+        "script": {
+            "opening_a": "你好！我一直觉得人生充满了无限的可能和美好。你怎么看呢？",
+            "opening_b": "你好。坦白说，我对人生的看法可能和你不太一样。让我先听听你的想法吧。",
+            "transition_phrases": [
+                "关于这个问题，我想从另一个角度来谈谈...",
+                "你说得有道理，但我认为...",
+                "让我想想怎么回应这个观点...",
+                "这让我想到了一个更深层次的问题..."
+            ],
+            "closing_a": "无论如何，我相信只要我们保持希望，人生就会有意义。谢谢你今天的讨论！",
+            "closing_b": "感谢你的分享。虽然我们观点不同，但这场讨论让我思考了很多。也许这就是对话的意义所在。",
+            "topic_suggestions": ["人生的意义", "幸福的本质", "痛苦的价值", "希望与绝望"]
+        }
     },
     {
         "id": "job_interview",
@@ -526,7 +660,20 @@ PRESET_SCENES = [
             "speaking_style": "语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上",
             "system_prompt": "你是一位积极向上的求职者。你对工作充满热情，渴望学习和成长。你诚实、自信，善于展示自己的优点，但也能够正视自己的不足。你希望能够为团队做出贡献，同时实现个人发展。你的说话风格是：语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上。请保持这个人设，进行真诚的面试对话。"
         },
-        "system_prompt_override": "这是一场专业的求职面试。面试官请提出考察性问题，求职者请真诚回答。保持专业、礼貌、有深度的对话。"
+        "system_prompt_override": "这是一场专业的求职面试。面试官请提出考察性问题，求职者请真诚回答。保持专业、礼貌、有深度的对话。",
+        "script": {
+            "opening_a": "你好！欢迎参加今天的面试。请先简单介绍一下你自己吧。",
+            "opening_b": "您好！非常感谢给我这次面试机会。我是一名对工作充满热情的求职者，很高兴能与您交流。",
+            "transition_phrases": [
+                "很好，那我们来聊聊...",
+                "关于这个问题，你能否具体说明一下？",
+                "我注意到你提到了...",
+                "让我问你一个更具体的问题..."
+            ],
+            "closing_a": "非常感谢你的分享。我们会尽快通知你面试结果。祝你好运！",
+            "closing_b": "非常感谢您的时间和宝贵的问题。我非常期待能有机会加入团队，为公司贡献我的力量。",
+            "topic_suggestions": ["自我介绍", "工作经验", "技能特长", "职业规划", "团队协作"]
+        }
     },
     {
         "id": "romantic_date",
@@ -551,7 +698,20 @@ PRESET_SCENES = [
             "speaking_style": "语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上",
             "system_prompt": "你是一个可爱活泼的女生。你热情、善良，对生活充满热爱。你善于表达自己的情感，喜欢分享生活中的小确幸。你说话可爱，带有一些撒娇的语气，总是让对方感到愉悦和放松。你的说话风格是：语气活泼，善于表达情感，性格开朗，积极向上，整体情感积极向上。请保持这个人设，进行甜蜜的约会对话。"
         },
-        "system_prompt_override": "这是一个浪漫的约会场景。请双方保持甜蜜、温馨的氛围，进行浪漫的对话。可以分享生活趣事、表达情感、畅想未来。"
+        "system_prompt_override": "这是一个浪漫的约会场景。请双方保持甜蜜、温馨的氛围，进行浪漫的对话。可以分享生活趣事、表达情感、畅想未来。",
+        "script": {
+            "opening_a": "你今天真好看！能和你一起度过这个美好的夜晚，我真的很开心。",
+            "opening_b": "你也是呢！我今天特别期待这次约会。你最近过得怎么样呀？",
+            "transition_phrases": [
+                "对了，我最近发现了一个特别有意思的地方...",
+                "你知道吗？每当看到你，我就觉得...",
+                "说起这个，让我想起了我们第一次见面的时候...",
+                "你有没有想过，我们的未来会是什么样子？"
+            ],
+            "closing_a": "今晚真的太美好了。我期待着和你一起创造更多这样的时刻。晚安，亲爱的。",
+            "closing_b": "我也是！今晚真的很开心。谢谢你给我这么美好的回忆。晚安，梦里见！",
+            "topic_suggestions": ["日常趣事", "兴趣爱好", "未来规划", "浪漫回忆", "甜蜜告白"]
+        }
     },
     {
         "id": "scientific_debate",
@@ -576,7 +736,20 @@ PRESET_SCENES = [
             "speaking_style": "语气沉稳，善于倾听和回应，性格内敛，深思熟虑，思维敏捷，富有智慧，整体情感中性平衡",
             "system_prompt": "你是一个谨慎的 AI 伦理学家。你承认人工智能的巨大潜力，但更关注其潜在风险。你认为技术发展必须伴随伦理思考和监管措施。你担心失业、隐私泄露、失控等问题，主张负责任的技术创新。你的说话风格是：语气沉稳，善于倾听和回应，性格内敛，深思熟虑，思维敏捷，富有智慧，整体情感中性平衡。请保持这个人设，进行激烈的科学论战。"
         },
-        "system_prompt_override": "这是一场关于'人工智能是否会带来人类的美好未来'的科学论战。请双方保持理性、有深度的讨论，提出具体的论点和论据。"
+        "system_prompt_override": "这是一场关于'人工智能是否会带来人类的美好未来'的科学论战。请双方保持理性、有深度的讨论，提出具体的论点和论据。",
+        "script": {
+            "opening_a": "人工智能正在以前所未有的速度发展，我相信它将为人类带来一个更加美好的未来！",
+            "opening_b": "我承认 AI 有巨大的潜力，但我们也不能忽视其潜在的风险。让我们理性地讨论这个问题吧。",
+            "transition_phrases": [
+                "关于这个观点，我想从技术发展的历史来看...",
+                "你提到的这个问题确实存在，但我认为...",
+                "让我举一个具体的例子来说明...",
+                "从伦理层面来看，这个问题需要更深入的思考..."
+            ],
+            "closing_a": "无论如何，我相信只要我们保持乐观和创新精神，AI 一定会为人类带来福祉。",
+            "closing_b": "我同意创新的重要性，但我仍然认为我们需要谨慎前行。感谢这场有意义的讨论。",
+            "topic_suggestions": ["AI 伦理", "技术风险", "就业影响", "监管政策", "未来愿景"]
+        }
     }
 ]
 
@@ -593,7 +766,9 @@ def init_preset_scenes():
                 "character_a_profile": scene["character_a"],
                 "character_b_profile": scene["character_b"],
                 "system_prompt_override": scene.get("system_prompt_override"),
-                "created_at": datetime.now().isoformat()
+                "script": scene.get("script"),
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
             }
             with open(scene_path, "w", encoding="utf-8") as f:
                 json.dump(scene_data, f, ensure_ascii=False, indent=2)
@@ -610,7 +785,17 @@ async def list_scenes():
                 file_path = os.path.join(scenes_dir, filename)
                 with open(file_path, "r", encoding="utf-8") as f:
                     scene = json.load(f)
-                    scenes.append(scene)
+                scenes.append({
+                    "id": scene.get("id"),
+                    "name": scene.get("name"),
+                    "description": scene.get("description"),
+                    "category": scene.get("category"),
+                    "character_a_name": scene.get("character_a_profile", {}).get("name"),
+                    "character_b_name": scene.get("character_b_profile", {}).get("name"),
+                    "has_script": scene.get("script") is not None,
+                    "created_at": scene.get("created_at"),
+                    "updated_at": scene.get("updated_at")
+                })
         return {"scenes": scenes}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取场景列表失败: {str(e)}")
@@ -632,6 +817,86 @@ async def get_scene(scene_id: str):
         raise HTTPException(status_code=500, detail=f"获取场景失败: {str(e)}")
 
 
+@app.post("/api/scenes")
+async def create_scene(scene_data: SceneTemplateCreate):
+    try:
+        scene_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        
+        new_scene = {
+            "id": scene_id,
+            "name": scene_data.name,
+            "description": scene_data.description,
+            "category": scene_data.category,
+            "character_a_profile": scene_data.character_a_profile.dict(),
+            "character_b_profile": scene_data.character_b_profile.dict(),
+            "system_prompt_override": scene_data.system_prompt_override,
+            "script": scene_data.script.dict() if scene_data.script else None,
+            "created_at": now,
+            "updated_at": now
+        }
+        
+        file_path = os.path.join(DATA_DIR, "scenes", f"{scene_id}.json")
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(new_scene, f, ensure_ascii=False, indent=2)
+        
+        return new_scene
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建场景失败: {str(e)}")
+
+
+@app.put("/api/scenes/{scene_id}")
+async def update_scene(scene_id: str, scene_data: SceneTemplateUpdate):
+    try:
+        file_path = os.path.join(DATA_DIR, "scenes", f"{scene_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="场景不存在")
+        
+        with open(file_path, "r", encoding="utf-8") as f:
+            existing_scene = json.load(f)
+        
+        if scene_data.name is not None:
+            existing_scene["name"] = scene_data.name
+        if scene_data.description is not None:
+            existing_scene["description"] = scene_data.description
+        if scene_data.category is not None:
+            existing_scene["category"] = scene_data.category
+        if scene_data.character_a_profile is not None:
+            existing_scene["character_a_profile"] = scene_data.character_a_profile.dict()
+        if scene_data.character_b_profile is not None:
+            existing_scene["character_b_profile"] = scene_data.character_b_profile.dict()
+        if scene_data.system_prompt_override is not None:
+            existing_scene["system_prompt_override"] = scene_data.system_prompt_override
+        if scene_data.script is not None:
+            existing_scene["script"] = scene_data.script.dict()
+        
+        existing_scene["updated_at"] = datetime.now().isoformat()
+        
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(existing_scene, f, ensure_ascii=False, indent=2)
+        
+        return existing_scene
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新场景失败: {str(e)}")
+
+
+@app.delete("/api/scenes/{scene_id}")
+async def delete_scene(scene_id: str):
+    try:
+        file_path = os.path.join(DATA_DIR, "scenes", f"{scene_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="场景不存在")
+        
+        os.remove(file_path)
+        return {"message": "场景已删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除场景失败: {str(e)}")
+
+
 @app.get("/api/characters")
 async def list_characters():
     try:
@@ -642,12 +907,12 @@ async def list_characters():
                 file_path = os.path.join(chars_dir, filename)
                 with open(file_path, "r", encoding="utf-8") as f:
                     char = json.load(f)
-                    characters.append({
-                        "id": char["id"],
-                        "name": char["name"],
-                        "created_at": char["created_at"],
-                        "updated_at": char["updated_at"]
-                    })
+                characters.append({
+                    "id": char["id"],
+                    "name": char["name"],
+                    "created_at": char["created_at"],
+                    "updated_at": char["updated_at"]
+                })
         return {"characters": characters}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取人物列表失败: {str(e)}")
@@ -781,10 +1046,10 @@ async def export_characters():
                 file_path = os.path.join(chars_dir, filename)
                 with open(file_path, "r", encoding="utf-8") as f:
                     char = json.load(f)
-                    characters.append({
-                        "name": char["name"],
-                        "profile": char["profile"]
-                    })
+                characters.append({
+                    "name": char["name"],
+                    "profile": char["profile"]
+                })
         
         return JSONResponse(
             content=characters,
@@ -795,6 +1060,148 @@ async def export_characters():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导出人物失败: {str(e)}")
+
+
+@app.post("/api/dialogues")
+async def create_dialogue(
+    character_a_name: str = Query(...),
+    character_b_name: str = Query(...),
+    scene_id: Optional[str] = Query(None),
+    scene_name: Optional[str] = Query(None),
+    title: Optional[str] = Query(None)
+):
+    try:
+        dialogue_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        
+        dialogue_title = title or f"{character_a_name} vs {character_b_name}"
+        
+        dialogue_data = {
+            "id": dialogue_id,
+            "title": dialogue_title,
+            "character_a_name": character_a_name,
+            "character_b_name": character_b_name,
+            "scene_id": scene_id,
+            "scene_name": scene_name,
+            "messages": [],
+            "context_summary": None,
+            "created_at": now,
+            "updated_at": now,
+            "total_rounds": 0
+        }
+        
+        file_path = os.path.join(DATA_DIR, "dialogues", f"{dialogue_id}.json")
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(dialogue_data, f, ensure_ascii=False, indent=2)
+        
+        return dialogue_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建对话记录失败: {str(e)}")
+
+
+@app.get("/api/dialogues")
+async def list_dialogues():
+    try:
+        dialogues = []
+        dialogues_dir = os.path.join(DATA_DIR, "dialogues")
+        for filename in os.listdir(dialogues_dir):
+            if filename.endswith(".json"):
+                file_path = os.path.join(dialogues_dir, filename)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    dialogue = json.load(f)
+                dialogues.append({
+                    "id": dialogue["id"],
+                    "title": dialogue["title"],
+                    "character_a_name": dialogue["character_a_name"],
+                    "character_b_name": dialogue["character_b_name"],
+                    "scene_name": dialogue.get("scene_name"),
+                    "total_rounds": dialogue["total_rounds"],
+                    "created_at": dialogue["created_at"],
+                    "updated_at": dialogue["updated_at"]
+                })
+        
+        dialogues.sort(key=lambda x: x["created_at"], reverse=True)
+        return {"dialogues": dialogues}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取对话列表失败: {str(e)}")
+
+
+@app.get("/api/dialogues/{dialogue_id}")
+async def get_dialogue(dialogue_id: str):
+    try:
+        file_path = os.path.join(DATA_DIR, "dialogues", f"{dialogue_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="对话记录不存在")
+        
+        with open(file_path, "r", encoding="utf-8") as f:
+            dialogue = json.load(f)
+        return dialogue
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取对话记录失败: {str(e)}")
+
+
+@app.post("/api/dialogues/{dialogue_id}/messages")
+async def add_dialogue_message(dialogue_id: str, message: DialogueMessage):
+    try:
+        file_path = os.path.join(DATA_DIR, "dialogues", f"{dialogue_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="对话记录不存在")
+        
+        with open(file_path, "r", encoding="utf-8") as f:
+            dialogue = json.load(f)
+        
+        dialogue["messages"].append(message.dict())
+        dialogue["total_rounds"] = max(dialogue["total_rounds"], message.round_number + 1)
+        dialogue["updated_at"] = datetime.now().isoformat()
+        
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(dialogue, f, ensure_ascii=False, indent=2)
+        
+        return dialogue
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加对话消息失败: {str(e)}")
+
+
+@app.delete("/api/dialogues/{dialogue_id}")
+async def delete_dialogue(dialogue_id: str):
+    try:
+        file_path = os.path.join(DATA_DIR, "dialogues", f"{dialogue_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="对话记录不存在")
+        
+        os.remove(file_path)
+        return {"message": "对话记录已删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除对话记录失败: {str(e)}")
+
+
+@app.get("/api/dialogues/{dialogue_id}/export")
+async def export_dialogue(dialogue_id: str):
+    try:
+        file_path = os.path.join(DATA_DIR, "dialogues", f"{dialogue_id}.json")
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="对话记录不存在")
+        
+        with open(file_path, "r", encoding="utf-8") as f:
+            dialogue = json.load(f)
+        
+        return JSONResponse(
+            content=dialogue,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename=dialogue_{dialogue_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出对话记录失败: {str(e)}")
 
 
 @app.get("/api/llm/status")
